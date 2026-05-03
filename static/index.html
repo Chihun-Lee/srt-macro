@@ -32,9 +32,15 @@
   .compact { font-size: 12px; color: #666; }
   .train-row { cursor: pointer; }
   .train-row:hover { background: #eef; }
+  #toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+           background: #222; color: #fff; padding: 10px 18px; border-radius: 6px;
+           font-size: 14px; opacity: 0; pointer-events: none; transition: opacity .2s;
+           box-shadow: 0 4px 12px rgba(0,0,0,.25); z-index: 1000; }
+  #toast.show { opacity: 0.95; }
 </style>
 </head>
 <body>
+<div id="toast"></div>
 <h1>SRT Macro <span class="compact">(개인용 — 본인 PC에서만 접속, 외부 노출 금지)</span></h1>
 <div class="warn">
   ⚠ <strong>이 도구는 개인이 본인 SRT 계정·본인 카드로만 사용해야 합니다.</strong>
@@ -124,6 +130,15 @@
 <script>
 const $ = (id) => document.getElementById(id);
 
+let _toastTimer = null;
+function toast(msg, ms = 1800) {
+  const el = $("toast");
+  el.textContent = msg;
+  el.classList.add("show");
+  if (_toastTimer) clearTimeout(_toastTimer);
+  _toastTimer = setTimeout(() => el.classList.remove("show"), ms);
+}
+
 async function api(method, path, body) {
   const opt = { method, headers: { "Content-Type": "application/json" } };
   if (body !== undefined) opt.body = JSON.stringify(body);
@@ -184,6 +199,7 @@ $("btn-search").onclick = async () => {
         $("j-date").value = $("s-date").value;
         $("j-time").value = $("s-time").value;
         $("j-train").value = t.train_number;
+        toast(`✓ SRT ${t.train_number} 적용됨 (③번 폼)`);
       };
       tbody.appendChild(tr);
     }
@@ -194,7 +210,7 @@ $("btn-search").onclick = async () => {
 
 $("btn-create-job").onclick = async () => {
   try {
-    await api("POST", "/api/jobs", {
+    const j = await api("POST", "/api/jobs", {
       dep: $("j-dep").value, arr: $("j-arr").value,
       date: $("j-date").value, time: $("j-time").value,
       train_number: $("j-train").value || null,
@@ -202,6 +218,7 @@ $("btn-create-job").onclick = async () => {
       seat_pref: $("j-seat").value,
       pay_mode: $("j-pay").value,
     });
+    toast(`✓ ${j.id} 생성됨 (${j.spec.dep}→${j.spec.arr} ${j.spec.train_number || "시각 이후 첫차"})`, 2400);
     refreshJobs();
   } catch (e) { alert("생성 실패: " + e.message); }
 };
