@@ -1,30 +1,24 @@
 """Secret storage for SRT credentials and card info.
 
-Saved to ~/.config/k-skill/srt_macro.env with mode 0600.
-Never logged, never returned via API in plaintext.
+Backed by macOS Keychain via the `keyring` library
+(`keyring.backends.macOS.Keyring`, Security.framework).
+
+The whole credential blob is JSON-encoded and stored as a single
+Keychain item under (service=KEYRING_SERVICE, username=KEYRING_USER).
+
+Encryption-at-rest is handled by macOS — the value is sealed with the
+user's login keychain master key and never written to disk in plaintext.
 """
 from __future__ import annotations
 
-import os
-import stat
-from pathlib import Path
+import json
 from typing import Optional
 
+import keyring
 from pydantic import BaseModel, Field
 
-CONFIG_DIR = Path.home() / ".config" / "k-skill"
-CONFIG_FILE = CONFIG_DIR / "srt_macro.env"
-
-FIELDS = (
-    "SRT_ID",
-    "SRT_PASSWORD",
-    "CARD_NUMBER",
-    "CARD_PASSWORD",
-    "CARD_VALIDATION",
-    "CARD_EXPIRE",
-    "CARD_TYPE",
-    "CARD_INSTALLMENT",
-)
+KEYRING_SERVICE = "srt-macro"
+KEYRING_USER = "config"
 
 
 class Credentials(BaseModel):
@@ -38,55 +32,47 @@ class Credentials(BaseModel):
     card_installment: int = Field(default=0, ge=0, le=24)
 
 
+def _read_blob() -> Optional[str]:
+    return keyring.get_password(KEYRING_SERVICE, KEYRING_USER)
+
+
 def exists() -> bool:
-    return CONFIG_FILE.is_file()
+    return _read_blob() is not None
 
 
 def load() -> Optional[Credentials]:
-    if not exists():
+    blob = _read_blob()
+    if not blob:
         return None
-    data: dict[str, str] = {}
-    for line in CONFIG_FILE.read_text().splitlines():
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        k, v = line.split("=", 1)
-        data[k.strip()] = v.strip()
     try:
-        return Credentials(
-            srt_id=data["SRT_ID"],
-            srt_password=data["SRT_PASSWORD"],
-            card_number=data["CARD_NUMBER"],
-            card_password=data["CARD_PASSWORD"],
-            card_validation=data["CARD_VALIDATION"],
-            card_expire=data["CARD_EXPIRE"],
-            card_type=data.get("CARD_TYPE", "J"),
-            card_installment=int(data.get("CARD_INSTALLMENT", "0")),
-        )
-    except KeyError:
+        return Credentials.model_validate_json(blob)
+    except Exception:
         return None
 
 
 def save(creds: Credentials) -> None:
-    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    body = (
-        f"SRT_ID={creds.srt_id}\n"
-        f"SRT_PASSWORD={creds.srt_password}\n"
-        f"CARD_NUMBER={creds.card_number.replace('-', '').replace(' ', '')}\n"
-        f"CARD_PASSWORD={creds.card_password}\n"
-        f"CARD_VALIDATION={creds.card_validation}\n"
-        f"CARD_EXPIRE={creds.card_expire}\n"
-        f"CARD_TYPE={creds.card_type}\n"
-        f"CARD_INSTALLMENT={creds.card_installment}\n"
-    )
-    CONFIG_FILE.write_text(body)
-    os.chmod(CONFIG_FILE, stat.S_IRUSR | stat.S_IWUSR)
+    payload = {
+        "srt_id": creds.srt_id,
+        "srt_password": creds.srt_password,
+        "card_number": creds.card_number.replace("-", "").replace(" ", ""),
+        "card_password": creds.card_password,
+        "card_validation": creds.card_validation,
+        "card_expire": creds.card_expire,
+        "card_type": creds.card_type,
+        "card_installment": creds.card_installment,
+    }
+    keyring.set_password(KEYRING_SERVICE, KEYRING_USER, json.dumps(payload))
+
+
+def clear() -> None:
+    try:
+        keyring.delete_password(KEYRING_SERVICE, KEYRING_USER)
+    except keyring.errors.PasswordDeleteError:
+        pass
 
 
 def public_status() -> dict:
     """Return non-sensitive metadata about saved credentials."""
-    if not exists():
-        return {"configured": False}
     creds = load()
     if not creds:
         return {"configured": False}
@@ -98,4 +84,5 @@ def public_status() -> dict:
         "card_masked": masked,
         "card_type": creds.card_type,
         "card_installment": creds.card_installment,
+        "storage": "macOS Keychain",
     }

@@ -3,8 +3,8 @@
 본인 SRT 계정·본인 카드로 매진된 SRT 좌석을 폴링·예매·결제하는 개인 도구.
 
 > ⚠ **개인용 한정.** 본인 PC 로컬에서만 띄우세요. 서버는 `127.0.0.1:8910`에만 바인딩되며,
-> 자격증명·카드정보는 `~/.config/k-skill/srt_macro.env` (mode 0600)에 저장됩니다.
-> git 저장소에는 절대 올라가지 않습니다 (`.gitignore` 참고).
+> 자격증명·카드정보는 **macOS Keychain** (Security.framework, login keychain)에 암호화 저장됩니다.
+> 디스크 평문 파일이 만들어지지 않습니다.
 
 ## Features
 

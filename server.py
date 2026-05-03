@@ -84,6 +84,12 @@ def post_config(body: CredentialsIn):
     return config.public_status()
 
 
+@app.delete("/api/config")
+def delete_config():
+    config.clear()
+    return {"ok": True}
+
+
 @app.post("/api/search")
 def post_search(body: SearchIn):
     try:
