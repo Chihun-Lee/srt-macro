@@ -1,0 +1,171 @@
+#!/bin/bash
+# SRT 매크로 설치 스크립트 (macOS)
+# 사용법:
+#   curl -fsSL https://raw.githubusercontent.com/Chihun-Lee/srt-macro/main/install.sh | bash
+# 또는 install.command 다운받아 더블클릭
+set -e
+
+REPO="https://github.com/Chihun-Lee/srt-macro.git"
+INSTALL_DIR="${SRT_MACRO_HOME:-$HOME/.srt-macro}"
+APP_DIR="$HOME/Applications"
+RUN_APP="$APP_DIR/SRT 매크로.app"
+QUIT_APP="$APP_DIR/SRT 매크로 종료.app"
+PORT=8910
+
+echo ""
+echo "════════════════════════════════════════"
+echo "  SRT 매크로 설치 시작"
+echo "════════════════════════════════════════"
+echo ""
+
+# ─── 1. python3 확인 ───
+echo "[1/5] Python 확인..."
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "  → Python3가 없습니다. macOS 명령행 도구를 설치합니다."
+  echo "  → 팝업이 뜨면 [설치]를 클릭하세요. (5~10분 소요)"
+  xcode-select --install 2>&1 || true
+  echo ""
+  echo "  설치가 끝나면 이 .command 파일을 다시 더블클릭하세요."
+  read -p "  엔터 키를 누르면 창이 닫힙니다..."
+  exit 1
+fi
+PY_VER=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
+echo "  ✓ Python $PY_VER"
+
+# ─── 2. 코드 다운로드 / 업데이트 ───
+echo "[2/5] 코드 다운로드..."
+mkdir -p "$APP_DIR"
+if [ -d "$INSTALL_DIR/.git" ]; then
+  echo "  → 기존 설치 업데이트 중"
+  git -C "$INSTALL_DIR" fetch --quiet
+  git -C "$INSTALL_DIR" reset --hard origin/main --quiet
+else
+  if [ -d "$INSTALL_DIR" ]; then
+    rm -rf "$INSTALL_DIR"
+  fi
+  git clone --quiet "$REPO" "$INSTALL_DIR"
+fi
+echo "  ✓ $INSTALL_DIR"
+
+# ─── 3. 가상환경 + 의존성 ───
+echo "[3/5] Python 환경 구성 (1~2분 소요)..."
+if [ ! -x "$INSTALL_DIR/venv/bin/python" ]; then
+  python3 -m venv "$INSTALL_DIR/venv"
+fi
+"$INSTALL_DIR/venv/bin/pip" install --quiet --upgrade pip
+"$INSTALL_DIR/venv/bin/pip" install --quiet -r "$INSTALL_DIR/requirements.txt"
+echo "  ✓ 의존성 설치 완료"
+
+# ─── 4. 실행 .app 번들 ───
+echo "[4/5] 앱 번들 생성..."
+rm -rf "$RUN_APP" "$QUIT_APP"
+
+mkdir -p "$RUN_APP/Contents/MacOS"
+cat > "$RUN_APP/Contents/Info.plist" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleName</key><string>SRT 매크로</string>
+  <key>CFBundleDisplayName</key><string>SRT 매크로</string>
+  <key>CFBundleIdentifier</key><string>com.chihunlee.srt-macro</string>
+  <key>CFBundleVersion</key><string>1.0</string>
+  <key>CFBundleShortVersionString</key><string>1.0</string>
+  <key>CFBundleExecutable</key><string>srt-macro</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>LSUIElement</key><true/>
+</dict>
+</plist>
+EOF
+
+cat > "$RUN_APP/Contents/MacOS/srt-macro" <<EOF
+#!/bin/bash
+INSTALL_DIR="$INSTALL_DIR"
+PORT=$PORT
+LOG="/tmp/srt-macro.log"
+
+# 이미 떠있으면 종료 후 재시작
+EXISTING=\$(lsof -ti tcp:\$PORT -sTCP:LISTEN 2>/dev/null)
+if [ -n "\$EXISTING" ]; then
+  kill \$EXISTING 2>/dev/null
+  sleep 1
+fi
+
+cd "\$INSTALL_DIR"
+nohup "\$INSTALL_DIR/venv/bin/python" server.py > "\$LOG" 2>&1 &
+
+# 서버 부팅 대기 (최대 15초)
+for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
+  if curl -fsS http://127.0.0.1:\$PORT/api/config/status > /dev/null 2>&1; then
+    open "http://127.0.0.1:\$PORT"
+    osascript -e 'display notification "브라우저가 열립니다. 종료는 [SRT 매크로 종료] 더블클릭." with title "SRT 매크로 시작됨" sound name "Glass"'
+    exit 0
+  fi
+  sleep 1
+done
+
+osascript -e 'display alert "SRT 매크로 시작 실패" message "로그: /tmp/srt-macro.log\n\n설치 .command를 다시 더블클릭해 보세요." as critical'
+EOF
+chmod +x "$RUN_APP/Contents/MacOS/srt-macro"
+
+mkdir -p "$QUIT_APP/Contents/MacOS"
+cat > "$QUIT_APP/Contents/Info.plist" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleName</key><string>SRT 매크로 종료</string>
+  <key>CFBundleDisplayName</key><string>SRT 매크로 종료</string>
+  <key>CFBundleIdentifier</key><string>com.chihunlee.srt-macro-quit</string>
+  <key>CFBundleVersion</key><string>1.0</string>
+  <key>CFBundleExecutable</key><string>quit</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>LSUIElement</key><true/>
+</dict>
+</plist>
+EOF
+
+cat > "$QUIT_APP/Contents/MacOS/quit" <<EOF
+#!/bin/bash
+PORT=$PORT
+PIDS=\$(lsof -ti tcp:\$PORT -sTCP:LISTEN 2>/dev/null)
+if [ -n "\$PIDS" ]; then
+  kill \$PIDS
+  osascript -e 'display notification "SRT 매크로 종료됨" with title "SRT 매크로" sound name "Pop"'
+else
+  osascript -e 'display notification "이미 종료된 상태입니다" with title "SRT 매크로"'
+fi
+EOF
+chmod +x "$QUIT_APP/Contents/MacOS/quit"
+
+# 다운받은 파일이 아니라 만들어진 파일이라 quarantine은 없지만 방어적으로 제거
+xattr -dr com.apple.quarantine "$RUN_APP" 2>/dev/null || true
+xattr -dr com.apple.quarantine "$QUIT_APP" 2>/dev/null || true
+
+echo "  ✓ $RUN_APP"
+echo "  ✓ $QUIT_APP"
+
+# ─── 5. 안내 ───
+echo "[5/5] 완료!"
+echo ""
+echo "════════════════════════════════════════"
+echo "  ✅ 설치 완료"
+echo "════════════════════════════════════════"
+echo ""
+echo "  사용법:"
+echo "    1. Launchpad 열기 (F4 또는 화면 모서리 트랙패드 핀치)"
+echo "    2. 'SRT 매크로' 검색 → 더블클릭"
+echo "    3. 자동으로 브라우저가 열립니다"
+echo ""
+echo "  종료:"
+echo "    Launchpad에서 'SRT 매크로 종료' 더블클릭"
+echo ""
+echo "  처음 실행 시 macOS가 키체인 접근을 묻습니다 → [항상 허용] 클릭"
+echo ""
+
+# 바로 한 번 띄워주기
+read -p "  지금 바로 실행할까요? [y/N] " -n 1 -r
+echo
+if [[ $REPLY =~ ^[Yy]$ ]]; then
+  open "$RUN_APP"
+fi
