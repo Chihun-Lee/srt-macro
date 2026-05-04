@@ -18,7 +18,7 @@ from enum import Enum
 from typing import Deque, Optional
 
 from SRT import SRT, Adult, SeatType
-from SRT.errors import SRTError, SRTNotLoggedInError
+from SRT.errors import SRTError, SRTNotLoggedInError, SRTNetFunnelError
 
 import config
 
@@ -120,8 +120,11 @@ class JobManager:
             job.log("ERROR: credentials missing")
             return
 
+        def _new_client() -> SRT:
+            return SRT(creds.srt_id, creds.srt_password)
+
         try:
-            srt = SRT(creds.srt_id, creds.srt_password)
+            srt = _new_client()
         except Exception as e:
             job.status = JobStatus.ERROR
             job.error = f"login failed: {e}"
@@ -132,6 +135,7 @@ class JobManager:
         job.status = JobStatus.POLLING
 
         seat_choice = self._seat_pref_to_enum(job.spec.seat_pref)
+        consecutive_netfunnel_errors = 0
 
         while not job._stop.is_set():
             job.attempts += 1
@@ -140,6 +144,7 @@ class JobManager:
                     job.spec.dep, job.spec.arr, job.spec.date, job.spec.time,
                     available_only=False,
                 )
+                consecutive_netfunnel_errors = 0
                 target = self._pick_target(trains, job.spec)
                 if target is None:
                     job.log(f"#{job.attempts} target not found")
@@ -172,8 +177,39 @@ class JobManager:
                     srt.login(creds.srt_id, creds.srt_password)
                 except Exception as e:
                     job.log(f"re-login failed: {e}")
+            except SRTNetFunnelError as e:
+                consecutive_netfunnel_errors += 1
+                # invalidate cached netfunnel key
+                helper = getattr(srt, "netfunnel_helper", None)
+                if helper is not None:
+                    helper._cached_key = None
+                if consecutive_netfunnel_errors >= 3:
+                    job.log(f"netfunnel persistent ({consecutive_netfunnel_errors}x) → recreating client")
+                    try:
+                        srt = _new_client()
+                        consecutive_netfunnel_errors = 0
+                    except Exception as e2:
+                        job.log(f"client recreate failed: {e2}")
+                else:
+                    job.log(f"netfunnel error #{consecutive_netfunnel_errors}, key invalidated: {str(e)[:80]}")
             except Exception as e:
-                job.log(f"poll error: {e}")
+                msg = str(e)
+                if "NetFunnel" in msg:
+                    consecutive_netfunnel_errors += 1
+                    helper = getattr(srt, "netfunnel_helper", None)
+                    if helper is not None:
+                        helper._cached_key = None
+                    if consecutive_netfunnel_errors >= 3:
+                        job.log(f"netfunnel persistent ({consecutive_netfunnel_errors}x) → recreating client")
+                        try:
+                            srt = _new_client()
+                            consecutive_netfunnel_errors = 0
+                        except Exception as e2:
+                            job.log(f"client recreate failed: {e2}")
+                    else:
+                        job.log(f"netfunnel error #{consecutive_netfunnel_errors}, key invalidated")
+                else:
+                    job.log(f"poll error: {e}")
 
             sleep_for = random.uniform(MIN_INTERVAL, MAX_INTERVAL)
             job.log(f"sleep {sleep_for:.1f}s")
