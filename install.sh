@@ -97,24 +97,28 @@ if [ -x "$INSTALL_DIR/venv/bin/python" ] && ! _venv_ok; then
   echo "  → 기존 venv 가 3.10 미만 / pip 없음 / arch mismatch → 재생성"
   rm -rf "$INSTALL_DIR/venv"
 fi
+ARCH_PREFIX=""
+if [ "$SYS_ARCH" = "arm64" ]; then
+  ARCH_PREFIX="arch -arm64"
+fi
 if [ ! -x "$INSTALL_DIR/venv/bin/python" ]; then
-  "$PYTHON_BIN" -m venv "$INSTALL_DIR/venv"
+  $ARCH_PREFIX "$PYTHON_BIN" -m venv "$INSTALL_DIR/venv"
 fi
 VENV_PY="$INSTALL_DIR/venv/bin/python"
-if ! "$VENV_PY" -m pip --version >/dev/null 2>&1; then
-  "$VENV_PY" -m ensurepip --upgrade 2>/dev/null || true
-  if ! "$VENV_PY" -m pip --version >/dev/null 2>&1; then
+if ! $ARCH_PREFIX "$VENV_PY" -m pip --version >/dev/null 2>&1; then
+  $ARCH_PREFIX "$VENV_PY" -m ensurepip --upgrade 2>/dev/null || true
+  if ! $ARCH_PREFIX "$VENV_PY" -m pip --version >/dev/null 2>&1; then
     echo "  → pip 부트스트랩 (get-pip.py)"
-    curl -fsSL https://bootstrap.pypa.io/get-pip.py | "$VENV_PY"
+    curl -fsSL https://bootstrap.pypa.io/get-pip.py | $ARCH_PREFIX "$VENV_PY"
   fi
 fi
-if ! "$VENV_PY" -m pip --version >/dev/null 2>&1; then
+if ! $ARCH_PREFIX "$VENV_PY" -m pip --version >/dev/null 2>&1; then
   echo "  ✗ pip 부트스트랩 실패. https://www.python.org/downloads/macos/ 에서 Python 재설치 후 다시 시도."
   read -p "  엔터로 종료..."
   exit 1
 fi
-"$VENV_PY" -m pip install --quiet --upgrade pip
-"$VENV_PY" -m pip install --quiet -r "$INSTALL_DIR/requirements.txt"
+$ARCH_PREFIX "$VENV_PY" -m pip install --quiet --upgrade pip
+$ARCH_PREFIX "$VENV_PY" -m pip install --quiet -r "$INSTALL_DIR/requirements.txt"
 echo "  ✓ 의존성 설치 완료"
 
 # ─── 4. 실행 .app 번들 ───
@@ -155,6 +159,7 @@ cat > "$RUN_APP/Contents/MacOS/srt-macro" <<EOF
 INSTALL_DIR="$INSTALL_DIR"
 PORT=$PORT
 LOG="/tmp/srt-macro.log"
+ARCH_PREFIX="$ARCH_PREFIX"
 
 # 이미 떠있으면 종료 후 재시작
 EXISTING=\$(lsof -ti tcp:\$PORT -sTCP:LISTEN 2>/dev/null)
@@ -164,7 +169,7 @@ if [ -n "\$EXISTING" ]; then
 fi
 
 cd "\$INSTALL_DIR"
-nohup "\$INSTALL_DIR/venv/bin/python" server.py > "\$LOG" 2>&1 &
+nohup \$ARCH_PREFIX "\$INSTALL_DIR/venv/bin/python" server.py > "\$LOG" 2>&1 &
 
 # 서버 부팅 대기 (최대 15초)
 for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
