@@ -18,10 +18,14 @@ echo "  SRT 매크로 설치 시작"
 echo "════════════════════════════════════════"
 echo ""
 
-# ─── 1. Python 3.10+ 확인 (ensurepip 포함) ───
-echo "[1/5] Python 3.10+ 확인 (ensurepip 포함)..."
+# ─── 1. Python 3.10+ 확인 (ensurepip + 아키텍처) ───
+echo "[1/5] Python 3.10+ 확인 (ensurepip + 아키텍처)..."
+SYS_ARCH=$(uname -m)
 _check_py() {
-  "$1" -c 'import sys, ensurepip; sys.exit(0 if sys.version_info >= (3,10) else 1)' 2>/dev/null
+  "$1" -c 'import sys, ensurepip; sys.exit(0 if sys.version_info >= (3,10) else 1)' 2>/dev/null || return 1
+  local pa
+  pa=$("$1" -c 'import platform; print(platform.machine())' 2>/dev/null)
+  [ "$pa" = "$SYS_ARCH" ]
 }
 PYTHON_BIN=""
 for cand in python3.13 python3.12 python3.11 python3.10; do
@@ -81,11 +85,17 @@ echo "  ✓ $INSTALL_DIR"
 
 # ─── 3. 가상환경 + 의존성 ───
 echo "[3/5] Python 환경 구성 (1~2분 소요)..."
-if [ -x "$INSTALL_DIR/venv/bin/python" ]; then
-  if ! "$INSTALL_DIR/venv/bin/python" -c 'import sys, pip; sys.exit(0 if sys.version_info >= (3,10) else 1)' 2>/dev/null; then
-    echo "  → 기존 venv 가 3.10 미만 또는 pip 없음 → 재생성"
-    rm -rf "$INSTALL_DIR/venv"
-  fi
+_venv_ok() {
+  local p="$INSTALL_DIR/venv/bin/python"
+  [ -x "$p" ] || return 1
+  "$p" -c 'import sys, pip; sys.exit(0 if sys.version_info >= (3,10) else 1)' 2>/dev/null || return 1
+  local pa
+  pa=$("$p" -c 'import platform; print(platform.machine())' 2>/dev/null)
+  [ "$pa" = "$SYS_ARCH" ]
+}
+if [ -x "$INSTALL_DIR/venv/bin/python" ] && ! _venv_ok; then
+  echo "  → 기존 venv 가 3.10 미만 / pip 없음 / arch mismatch → 재생성"
+  rm -rf "$INSTALL_DIR/venv"
 fi
 if [ ! -x "$INSTALL_DIR/venv/bin/python" ]; then
   "$PYTHON_BIN" -m venv "$INSTALL_DIR/venv"
